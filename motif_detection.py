@@ -213,155 +213,18 @@ def ipa_to_segments(ipa: str) -> list[Phoneme]:
 
     return segments
 
-@lru_cache(maxsize=100000)
-def cached_text_to_segments(segment: str, lang: str):
-    return ipa_to_segments(text_to_ipa(segment, lang))
-
-WORD_RE = re.compile(r"\S+")
-
 def find_phoneme_to_text_mapping(
-        plaintext: str,
-        phonemized: list[Phoneme],
-        lang: str = "pl"
-    ) -> list[dict["phoneme_index" | "plaintext_start" | "plaintext_end", int | str]]:
+    plaintext: str,
+    phonemized: list[Phoneme],
+    lang: str = "pl"
+) -> list[dict["phoneme_index" | "plaintext_start" | "plaintext_end", int | str]]:
     """
     Find beginning and ending indices of text characters in plaintext, corresponding to Phonemes in list
-
-    It is done using greedy word-level alignment
-
+    It assumes that for each Phoneme, many or none graphemes from plaintext can be assigned
     Returned values have format:
     [{ "phoneme_index": int, "plaintext_index_start": int, "plaintext_index_end": int }, ...]
     """
-    # extract words with spans
-    words = [
-        (m.group(), m.start(), m.end())
-        for m in WORD_RE.finditer(plaintext)
-    ]
-    result = []
-    phon_index = 0
-
-    for word, w_start, w_end in words:
-        word_ipa = text_to_ipa(word, lang=lang)
-        print(word_ipa)
-        word_segments = ipa_to_segments(word_ipa)
-
-        aligned = align_word_to_phonemes(
-            plaintext_word=word,
-            phonemized_word=word_segments,
-            lang=lang
-        )
-
-        if not aligned:
-            # as fallback use whole word for all phonemes
-            for idx in range(phon_index, phon_index + len(word_segments)):
-                result.append({
-                    "phoneme_index": idx,
-                    "plaintext_start": w_start,
-                    "plaintext_end": w_end,
-                })
-            phon_index += len(word_segments)
-            continue
-
-        # aligned pieces are in word-local indices
-        for local_idx, span in enumerate(aligned):
-            global_idx = phon_index + local_idx
-
-            result.append({
-                "phoneme_index": global_idx,
-                "plaintext_start": w_start + span["word_index_start"],
-                "plaintext_end": w_start + span["word_index_end"],
-            })
-
-        phon_index += len(word_segments)
-
-    return result
-
-def align_word_to_phonemes(
-    plaintext_word: str,
-    phonemized_word: list[Phoneme],
-    lang: str = "pl",
-    beam_width: int = 5,
-    max_expand: int = 6
-) -> list[dict["word_index_start" | "word_index_start", int]]:
-    """
-    List in same order as Phonemes in phonemized_word, containing start and end of phonemes
-    [{ "word_index_start": int, "word_index_start": int }, ...]
-    """
-
-    def _phoneme_match_cost(a: list[Phoneme], b: list[Phoneme]) -> float:
-        """
-        Simple mismatch score, with symbol exact match
-        0 is perfect match, higher cost is worse
-        """
-        n = max(len(a), len(b))
-        cost = 0.0
-
-        for i in range(n):
-            if i >= len(a) or i >= len(b):
-                cost += 1.0
-                continue
-            if a[i].symbol != b[i].symbol:
-                cost += 1.0
-
-        return cost
-
-    n_chars = len(plaintext_word)
-    n_phon = len(phonemized_word)
-
-    initial = { "char_i": 0, "phon_i": 0, "path": [] }
-    beam = [initial]
-
-    finished = []
-
-    while beam:
-        new_beam = []
-
-        for state in beam:
-
-            if state["char_i"] == n_chars and state["phon_i"] == n_phon:
-                finished.append(state)
-                continue
-
-            if state["char_i"] >= n_chars or state["phon_i"] >= n_phon:
-                continue
-
-            # expand character span
-            for j in range(state["char_i"] + 1, min(n_chars + 1, state["char_i"] + max_expand + 1)):
-
-                segment = plaintext_word[state["char_i"]:j]
-
-                ipa = cached_text_to_segments(segment, lang=lang)
-
-                # try aligning to next phoneme chunk sizes
-                for k in range(1, min(n_phon - state["phon_i"] + 1, 6)):
-
-                    target = phonemized_word[state["phon_i"]:state["phon_i"] + k]
-
-                    cost = _phoneme_match_cost(ipa, target)
-
-                    new_path = state["path"] + [(state["char_i"], j, state["phon_i"], state["phon_i"] + k, cost)]
-
-                    new_beam.append(
-                        { "char_i": j, "phon_i": state["phon_i"] + k, "path": new_path }
-                    )
-
-        # prune beam
-        beam = sorted(new_beam, key=lambda s: len(s["path"]))[:beam_width]
-
-    if not finished:
-        return []
-
-    best = min(finished, key=lambda s: len(s["path"]))
-
-    # reconstruct output
-    result = []
-    for (ci, cj, pi, pj, cost) in best["path"]:
-        result.append({
-            "word_index_start": ci,
-            "word_index_end": cj,
-        })
-
-    return result
+    pass
 
 @dataclass(frozen=True)
 class MotifSpan:
@@ -382,7 +245,7 @@ class MotifSpan:
     def match_interval(self) -> Tuple[int, int]:
         return (self.match_start, self.match_end)
 
-    def covers(self, other: "MotifSpan") -> bool:
+    def covers(self, other: MotifSpan) -> bool:
         return self.start <= other.start and self.end >= other.end and self.match_start <= other.match_start and self.match_end >= other.match_end
 
 def extract_pairwise_motifs(X: np.ndarray, m_values: Iterable=range(2, 9), top_k_per_window: int=20):
@@ -443,19 +306,16 @@ def greedy_keep_longest_non_subset(candidates: list[MotifSpan]) -> list[MotifSpa
     return kept
 
 if __name__ == "__main__":
-    sample = "chrząszcz brzmi w trzcinie"
-    ipa_phonemes = ipa_to_segments(text_to_ipa(sample))
+    text = "W Szczebrzeszynie chrząszcz brzmi w trzcinie i Szczebrzeszyn z tego słynie"
+    ipa_phonemes = ipa_to_segments(text_to_ipa(text))
     print(ipa_phonemes)
 
-    # index_mapping = find_phoneme_to_text_mapping(sample, ipa_phonemes)
-    # print(index_mapping)
-
-    text_phoneme_mapping = find_phoneme_to_text_mapping(sample, ipa_phonemes)
+    text_phoneme_mapping = find_phoneme_to_text_mapping(text, ipa_phonemes)
 
     for phoneme_source, phoneme in zip(text_phoneme_mapping, ipa_phonemes):
         start = phoneme_source["plaintext_start"]
         end = phoneme_source["plaintext_end"]
-        print(f"{phoneme.symbol} -> {sample[start:end]!r}")
+        print(f"{phoneme.symbol} -> {text[start:end]!r}")
 
     # vectors_representation = np.array([phoneme.as_vector() for phoneme in ipa_phonemes], dtype=np.float64)
     # print(vectors_representation)
@@ -465,10 +325,6 @@ if __name__ == "__main__":
     # kept = greedy_keep_longest_non_subset(cands)
     # for c in kept:
     #     print(c.distance, c.length, ipa_phonemes[c.start:c.end], ipa_phonemes[c.match_start:c.match_end])
-
-# chrząszcz brzmi w trzcinie
-# xʃˈɔ̃ʒdʒ bʒmˈi f tʃtɕˈiɲʲɛ
-# [x, ʃ, ˈɔ̃, ʒ, d, ʒ, b, ʒ, m, ˈi, f, t͡ʃ, t͡ɕ, ˈi, ɲʲ, ɛ]
 
 # TODO
 # Original text of pairs would be found and motifs visualized
