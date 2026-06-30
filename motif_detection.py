@@ -4,6 +4,7 @@ import csv
 from dataclasses import dataclass
 import numpy as np
 import stumpy
+import unicodedata
 
 def text_to_ipa(text: str, lang: str = "pl") -> str:
     """
@@ -193,17 +194,22 @@ def ipa_to_segments(ipa: str) -> list[Phoneme]:
         if matched:
             continue
 
-        # palatalized consonants (simple heuristic)
-        if i + 1 < len(ipa) and ipa[i+1] == PALATAL_MARKER:
-            segments.append(get_phoneme(ipa[i] + "ʲ", stress=stress))
-            stress = False
-            i += 2
-            continue
+        # grab base char + following combining marks
+        j = i + 1
+        while j < len(ipa) and unicodedata.combining(ipa[j]):
+            j += 1
 
-        # normal phoneme
-        segments.append(get_phoneme(ipa[i], stress=stress))
+        symbol = ipa[i:j]
+
+        # palatalized consonants
+        if j < len(ipa) and ipa[j] == PALATAL_MARKER:
+            symbol += PALATAL_MARKER
+            j += 1
+
+        # append phoneme
+        segments.append(get_phoneme(symbol, stress=stress))
         stress = False
-        i += 1
+        i = j
 
     return segments
 
@@ -222,6 +228,8 @@ def find_phoneme_to_text_mapping(
     Returned values have format:
     [{ "phoneme_index": int, "plaintext_index_start": int, "plaintext_index_end": int }, ...]
     """
+
+    # TODO as of now it only matches boundaries of words
 
     # extract words with spans
     words = [
@@ -344,7 +352,7 @@ def greedy_keep_longest_non_subset(candidates: list[MotifSpan]) -> list[MotifSpa
     return kept
 
 if __name__ == "__main__":
-    sample = "nie chcę, nie chcę"
+    sample = "chrząszcz brzmi w trzcinie"
     ipa_phonemes = ipa_to_segments(text_to_ipa(sample))
     print(ipa_phonemes)
 
