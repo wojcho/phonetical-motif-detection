@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 import stumpy
 import unicodedata
-from functools import lru_cache
 
 def text_to_ipa(text: str, lang: str = "pl") -> str:
     """
