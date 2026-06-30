@@ -207,14 +207,62 @@ def ipa_to_segments(ipa: str) -> list[Phoneme]:
 
     return segments
 
-def find_phoneme_to_text_mapping(plaintext: str, phonemized: list[Phoneme]) -> list[dict["ipa_symbol" | "plaintext_start" | "plaintext_end", int | str]]:
+WORD_RE = re.compile(r"\S+")
+
+def find_phoneme_to_text_mapping(
+        plaintext: str,
+        phonemized: list[Phoneme],
+        lang: str = "pl"
+    ) -> list[dict["phoneme_index" | "plaintext_start" | "plaintext_end", int | str]]:
     """
     Find beginning and ending indices of text characters in plaintext, corresponding to Phonemes in list
+
+    It is done using greedy word-level alignment
+
     Returned values have format:
-    [{ "ipa_symbol": str, "plaintext_start": int, "plaintext_end": int }, ...]
+    [{ "phoneme_index": int, "plaintext_index_start": int, "plaintext_index_end": int }, ...]
     """
-    # TODO
-    pass
+
+    # extract words with spans
+    words = [
+        (m.group(), m.start(), m.end())
+        for m in WORD_RE.finditer(plaintext)
+    ]
+
+    result = []
+
+    phon_index = 0
+
+    for word, w_start, w_end in words:
+
+        # phonemize single word (ground truth reference)
+        word_ipa = text_to_ipa(word, lang=lang)
+
+        word_segments = ipa_to_segments(word_ipa)
+
+        # match phoneme part in global sequence
+        local_start = phon_index
+        local_end = phon_index + len(word_segments)
+
+        global_part = phonemized[local_start:local_end]
+
+        # sanity fallback, if mismatch then resync greedily
+        if len(global_part) != len(word_segments):
+            # fallback, trust global alignment window growth
+            local_end = min(len(phonemized), local_start + len(word_segments))
+            global_part = phonemized[local_start:local_end]
+
+        # assign character span to each phoneme
+        for idx, p in enumerate(global_part, start=local_start):
+            result.append({
+                "phoneme_index": idx,
+                "plaintext_start": w_start,
+                "plaintext_end": w_end,
+            })
+
+        phon_index = local_end
+
+    return result
 
 @dataclass(frozen=True)
 class MotifSpan:
@@ -299,14 +347,18 @@ if __name__ == "__main__":
     sample = "nie chcę, nie chcę"
     ipa_phonemes = ipa_to_segments(text_to_ipa(sample))
     print(ipa_phonemes)
-    vectors_representation = np.array([phoneme.as_vector() for phoneme in ipa_phonemes], dtype=np.float64)
-    print(vectors_representation)
-    vectors_for_stumpy = vectors_representation.T
-    X = vectors_representation.T
-    cands = extract_pairwise_motifs(X, m_values=range(3, 9), top_k_per_window=30)
-    kept = greedy_keep_longest_non_subset(cands)
-    for c in kept:
-        print(c.distance, c.length, ipa_phonemes[c.start:c.end], ipa_phonemes[c.match_start:c.match_end])
+
+    index_mapping = find_phoneme_to_text_mapping(sample, ipa_phonemes)
+    print(index_mapping)
+
+    # vectors_representation = np.array([phoneme.as_vector() for phoneme in ipa_phonemes], dtype=np.float64)
+    # print(vectors_representation)
+    # vectors_for_stumpy = vectors_representation.T
+    # X = vectors_representation.T
+    # cands = extract_pairwise_motifs(X, m_values=range(3, 9), top_k_per_window=30)
+    # kept = greedy_keep_longest_non_subset(cands)
+    # for c in kept:
+    #     print(c.distance, c.length, ipa_phonemes[c.start:c.end], ipa_phonemes[c.match_start:c.match_end])
 
 # ɲʲˈɛxtsɛ ɲʲˈɛxtsɛ
 # [ɲʲ, ˈɛ, x, t͡s, ɛ, ɲʲ, ˈɛ, x, t͡s, ɛ]
