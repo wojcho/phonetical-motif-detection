@@ -28,33 +28,6 @@ def load_feature_weights(path: str) -> dict[str, float]:
 
 FEATURE_WEIGHTS = load_feature_weights("./feature_weights.csv")
 
-CSV_FIELD_MAP = {
-    "syl": "syllabic",
-    "son": "sonorant",
-    "cons": "consonant",
-    "cont": "continuant",
-    "delrel": "delayed_release",
-    "lat": "lateral",
-    "nas": "nasal",
-    "strid": "strident",
-    "voi": "voiced",
-    "sg": "spread_glottis",
-    "cg": "constricted_glottis",
-    "ant": "anterior_place",
-    "cor": "coronal_place",
-    "distr": "distributed",
-    "lab": "labial",
-    "hi": "high_vowel_height",
-    "lo": "low_vowel_height",
-    "back": "back_vowel",
-    "round": "rounded",
-    "velaric": "velaric",
-    "tense": "tense",
-    "long": "long",
-    "hitone": "high_tone",
-    "hireg": "high_register",
-}
-
 _PHONEME_CACHE: dict[tuple[str, bool], Phoneme] = {}
 
 @dataclass(frozen=True, slots=True)
@@ -103,12 +76,12 @@ class Phoneme:
                 return None
             raise ValueError(f"Unrecognized feature cell: {v!r} for symbol {symbol!r}")
 
-        p = Phoneme(symbol=symbol, stress=stress)
-
         kwargs: dict[str, bool | None] = {}
-        for csv_col, attr_name in CSV_FIELD_MAP.items():
-            if csv_col in row:
-                kwargs[attr_name] = parse_cell(row[csv_col])
+        for attr_name in Phoneme.__dataclass_fields__.keys():
+            if attr_name in ("symbol", "stress"):
+                continue
+            if attr_name in row:
+                kwargs[attr_name] = parse_cell(row[attr_name])
 
         return Phoneme(symbol=symbol, stress=stress, **kwargs)
 
@@ -126,7 +99,7 @@ def load_ipa_features(path: str) -> Dict[str, Dict[str, str]]:
     with open(path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            sym = row["ipa"].strip()
+            sym = row["symbol"].strip()
             feats[sym] = row
     return feats
 
@@ -216,19 +189,15 @@ def ipa_to_segments(ipa: str):
 def phoneme_to_vec(p: Phoneme, weights: dict[str, float]) -> np.array:
     """
     Convert Phoneme to vector np.array representation
-    using feature order from CSV_FIELD_MAP keys
+    using feature order from weights.csv column names
     """
-    # Use CSV_FIELD_MAP order (source CSV columns), mapped to Phoneme attribute names.
-    ordered_fields = []
-    for csv_key, ph_attr in CSV_FIELD_MAP.items():
-        if csv_key in weights:
-            ordered_fields.append((csv_key, ph_attr, weights[csv_key]))
+    ordered_fields = list(weights.keys()) # using order from weights CSV
 
     vec = np.zeros(len(ordered_fields), dtype=np.float32)
 
-    for j, (csv_key, ph_attr, _) in enumerate(ordered_fields):
-        val = getattr(p, ph_attr, None)
-        w = weights[csv_key]
+    for j, feature_key in enumerate(ordered_fields):
+        val = getattr(p, feature_key, None)
+        w = weights[feature_key]
         if val is True:
             vec[j] = w
         elif val is False:
@@ -300,7 +269,6 @@ if __name__ == "__main__":
 # 23 38 0.39396502456440774 [ˈɛ, ɲʲ, ɛ, t] [ɔ, ɲ, ˈi, t]
 
 # TODO
-# Change Panphon CSV to have aligned names
 # Support patterns of various lengths pairwise same, and join by greedily leaving longest one and removing those which are its subsets
 # Original text of pairs would be found and motifs visualized, it could be done by retaining indices of occurence in original phonemes, refactored to separate PhonemeOccurence with stress and location, and as composition holding flyweight PhonemeType
 

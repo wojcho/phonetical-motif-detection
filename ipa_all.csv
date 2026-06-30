@@ -1,4 +1,4 @@
-ipa,syl,son,cons,cont,delrel,lat,nas,strid,voi,sg,cg,ant,cor,distr,lab,hi,lo,back,round,velaric,tense,long,hitone,hireg
+symbol,syllabic,sonorant,consonant,continuant,delayed_release,lateral,nasal,strident,voiced,spread_glottis,constricted_glottis,anterior_place,coronal_place,distributed,labial,high_vowel_height,low_vowel_height,back_vowel,rounded,velaric,tense,long,high_tone,high_register
 ˩,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-,-
 ˨,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,+,-
 ˧,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
