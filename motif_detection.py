@@ -260,10 +260,12 @@ def extract_pairwise_motifs(X: np.ndarray, m_values: Iterable=range(2, 9), top_k
 def greedy_keep_longest_non_subset(candidates: List[MotifSpan]) -> List[MotifSpan]:
     """
     Remove candidates which are subsets of longer spans
+    This also takes distance scores of pairs into account
+    If adding more phonemes does not cause match to be worse then it is kept
     """
     candidates = sorted(
         candidates,
-        key=lambda c: (c.distance, -c.m, c.start, c.match_start)
+        key=lambda c: (round(c.distance, 5), -c.m, c.start, c.match_start) # Without rounding there is floating point noise in distance scores
     )
 
     kept: List[MotifSpan] = []
@@ -283,7 +285,7 @@ def greedy_keep_longest_non_subset(candidates: List[MotifSpan]) -> List[MotifSpa
     return kept
 
 if __name__ == "__main__":
-    sample = "więcej przędzej przestrzeń wrzenie tego nigdy te gonitwy stracenia znaczenia powietrze po jeszcze"
+    sample = "nie chcę, nie chcę"
     ipa_phonemes = ipa_to_segments(text_to_ipa(sample))
     print(ipa_phonemes)
     vectors_representation = np.array([phoneme_to_vec(phoneme, FEATURE_WEIGHTS) for phoneme in ipa_phonemes], dtype=np.float64)
@@ -332,6 +334,7 @@ if __name__ == "__main__":
 
 # TODO
 # Original text of pairs would be found and motifs visualized, it could be done by retaining indices of occurence in original phonemes, refactored to separate PhonemeOccurence with stress and location, and as composition holding flyweight PhonemeType
+# Improve using a measurement rather than fixed amount of top pairs
 
 # Other more expensive algorithms could be ran on each window to reveal which have least distance in respect to some distance measure
 # Support patterns which have different lengths because of some insertions or deletions - Needleman–Wunsch or Smith–Waterman but not with equality but with feature vectors, Dynamic Time Warping, Soft-DTW
