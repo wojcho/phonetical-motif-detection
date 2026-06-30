@@ -85,6 +85,27 @@ class Phoneme:
 
         return Phoneme(symbol=symbol, stress=stress, **kwargs)
 
+    def as_vector(self: Phoneme, weights: dict[str, float] = FEATURE_WEIGHTS) -> np.array:
+      """
+      Convert Phoneme to vector np.array representation
+      using feature order from weights.csv column names
+      """
+      ordered_fields = list(weights.keys()) # using order from weights CSV
+
+      vec = np.zeros(len(ordered_fields), dtype=np.float64)
+
+      for j, feature_key in enumerate(ordered_fields):
+          val = getattr(self, feature_key, None)
+          w = weights[feature_key]
+          if val is True:
+              vec[j] = w
+          elif val is False:
+              vec[j] = -w
+          else:
+              vec[j] = 0.0
+      
+      return vec
+
     def __str__(self: Phoneme) -> str:
         return ("ˈ" if self.stress else "") + self.symbol
 
@@ -137,7 +158,7 @@ def normalize_ipa(ipa: str) -> str:
     ipa = re.sub("ˌ", "", ipa) # Remove secondary stress
     return ipa
 
-def ipa_to_segments(ipa: str):
+def ipa_to_segments(ipa: str) -> list[Phoneme]:
     """
     Tokenize IPA to Phoneme data classes
     """
@@ -186,35 +207,25 @@ def ipa_to_segments(ipa: str):
 
     return segments
 
-def phoneme_to_vec(p: Phoneme, weights: dict[str, float]) -> np.array:
+def find_phoneme_to_text_mapping(plaintext: str, phonemized: list[Phoneme]) -> list[dict["ipa_symbol" | "plaintext_start" | "plaintext_end", int | str]]:
     """
-    Convert Phoneme to vector np.array representation
-    using feature order from weights.csv column names
+    Find beginning and ending indices of text characters in plaintext, corresponding to Phonemes in list
+    Returned values have format:
+    [{ "ipa_symbol": str, "plaintext_start": int, "plaintext_end": int }, ...]
     """
-    ordered_fields = list(weights.keys()) # using order from weights CSV
-
-    vec = np.zeros(len(ordered_fields), dtype=np.float32)
-
-    for j, feature_key in enumerate(ordered_fields):
-        val = getattr(p, feature_key, None)
-        w = weights[feature_key]
-        if val is True:
-            vec[j] = w
-        elif val is False:
-            vec[j] = -w
-        else:
-            vec[j] = 0.0
-    
-    return vec
+    # TODO
+    pass
 
 @dataclass(frozen=True)
 class MotifSpan:
     start: int
     end: int # exclusive
+
     match_start: int
     match_end: int # exclusive
+
     distance: float
-    m: int
+    length: int
 
     @property
     def interval(self) -> Tuple[int, int]:
@@ -251,13 +262,13 @@ def extract_pairwise_motifs(X: np.ndarray, m_values: Iterable=range(2, 9), top_k
                     match_start=j,
                     match_end=int(j + m),
                     distance=float(profile[i]),
-                    m=m,
+                    length=m,
                 )
             )
 
     return candidates
 
-def greedy_keep_longest_non_subset(candidates: List[MotifSpan]) -> List[MotifSpan]:
+def greedy_keep_longest_non_subset(candidates: list[MotifSpan]) -> list[MotifSpan]:
     """
     Remove candidates which are subsets of longer spans
     This also takes distance scores of pairs into account
@@ -265,7 +276,7 @@ def greedy_keep_longest_non_subset(candidates: List[MotifSpan]) -> List[MotifSpa
     """
     candidates = sorted(
         candidates,
-        key=lambda c: (round(c.distance, 5), -c.m, c.start, c.match_start) # Without rounding there is floating point noise in distance scores
+        key=lambda c: (round(c.distance, 5), -c.length, c.start, c.match_start) # Without rounding there is floating point noise in distance scores
     )
 
     kept: List[MotifSpan] = []
@@ -274,7 +285,7 @@ def greedy_keep_longest_non_subset(candidates: List[MotifSpan]) -> List[MotifSpa
         for k in kept:
             if k.covers(c):
                 return True
-            if k.covers(MotifSpan(c.match_start, c.match_end, c.start, c.end, c.distance, c.m)):
+            if k.covers(MotifSpan(c.match_start, c.match_end, c.start, c.end, c.distance, c.length)):
                 return True
         return False
 
@@ -288,14 +299,14 @@ if __name__ == "__main__":
     sample = "nie chcę, nie chcę"
     ipa_phonemes = ipa_to_segments(text_to_ipa(sample))
     print(ipa_phonemes)
-    vectors_representation = np.array([phoneme_to_vec(phoneme, FEATURE_WEIGHTS) for phoneme in ipa_phonemes], dtype=np.float64)
+    vectors_representation = np.array([phoneme.as_vector() for phoneme in ipa_phonemes], dtype=np.float64)
     print(vectors_representation)
     vectors_for_stumpy = vectors_representation.T
     X = vectors_representation.T
     cands = extract_pairwise_motifs(X, m_values=range(3, 9), top_k_per_window=30)
     kept = greedy_keep_longest_non_subset(cands)
     for c in kept:
-        print(c.distance, c.m, ipa_phonemes[c.start:c.end], ipa_phonemes[c.match_start:c.match_end])
+        print(c.distance, c.length, ipa_phonemes[c.start:c.end], ipa_phonemes[c.match_start:c.match_end])
 
 # ɲʲˈɛxtsɛ ɲʲˈɛxtsɛ
 # [ɲʲ, ˈɛ, x, t͡s, ɛ, ɲʲ, ˈɛ, x, t͡s, ɛ]
@@ -342,7 +353,7 @@ if __name__ == "__main__":
 # 2.4341212550852145 7 [ɲʲ, ˈɛ, x, t͡s, ɛ, ɲʲ, ˈɛ] [t͡s, ɛ, ɲʲ, ˈɛ, x, t͡s, ɛ]
 
 # TODO
-# Original text of pairs would be found and motifs visualized, it could be done by retaining indices of occurence in original phonemes, refactored to separate PhonemeOccurence with stress and location, and as composition holding flyweight PhonemeType
+# Original text of pairs would be found and motifs visualized
 # Improve using a measurement rather than fixed amount of top pairs
 
 # Other more expensive algorithms could be ran on each window to reveal which have least distance in respect to some distance measure
