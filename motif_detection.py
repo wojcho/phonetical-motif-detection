@@ -207,6 +207,81 @@ def phoneme_to_vec(p: Phoneme, weights: dict[str, float]) -> np.array:
     
     return vec
 
+@dataclass(frozen=True)
+class MotifSpan:
+    start: int
+    end: int # exclusive
+    match_start: int
+    match_end: int # exclusive
+    distance: float
+    m: int
+
+    @property
+    def interval(self) -> Tuple[int, int]:
+        return (self.start, self.end)
+
+    @property
+    def match_interval(self) -> Tuple[int, int]:
+        return (self.match_start, self.match_end)
+
+    def covers(self, other: "MotifSpan") -> bool:
+        return self.start <= other.start and self.end >= other.end and self.match_start <= other.match_start and self.match_end >= other.match_end
+
+def extract_pairwise_motifs(X: np.ndarray, m_values: Iterable=range(2, 9), top_k_per_window: int=20):
+    """
+    X: shape (n_features, n_timestamps) for stumpy
+    Returns motif candidates across multiple window lengths.
+    """
+    candidates: list[MotifSpan] = []
+
+    for m in m_values:
+        P, I = stumpy.mstump(X, m=m)
+        profile = P[-1]
+        indices = I[-1]
+
+        best = np.argsort(profile)[:top_k_per_window]
+        for i in best:
+            j = int(indices[i])
+            if j < 0:
+                continue
+            candidates.append(
+                MotifSpan(
+                    start=int(i),
+                    end=int(i + m),
+                    match_start=j,
+                    match_end=int(j + m),
+                    distance=float(profile[i]),
+                    m=m,
+                )
+            )
+
+    return candidates
+
+def greedy_keep_longest_non_subset(candidates: List[MotifSpan]) -> List[MotifSpan]:
+    """
+    Remove candidates which are subsets of longer spans
+    """
+    candidates = sorted(
+        candidates,
+        key=lambda c: (c.distance, -c.m, c.start, c.match_start)
+    )
+
+    kept: List[MotifSpan] = []
+
+    def is_subset_of_kept(c: MotifSpan) -> bool:
+        for k in kept:
+            if k.covers(c):
+                return True
+            if k.covers(MotifSpan(c.match_start, c.match_end, c.start, c.end, c.distance, c.m)):
+                return True
+        return False
+
+    for c in candidates:
+        if not is_subset_of_kept(c):
+            kept.append(c)
+
+    return kept
+
 if __name__ == "__main__":
     sample = "więcej przędzej przestrzeń wrzenie tego nigdy te gonitwy stracenia znaczenia powietrze po jeszcze"
     ipa_phonemes = ipa_to_segments(text_to_ipa(sample))
@@ -214,24 +289,11 @@ if __name__ == "__main__":
     vectors_representation = np.array([phoneme_to_vec(phoneme, FEATURE_WEIGHTS) for phoneme in ipa_phonemes], dtype=np.float64)
     print(vectors_representation)
     vectors_for_stumpy = vectors_representation.T
-    m = 4 # TODO later using for loop with various m, and keep greedily longest pattern found rather than its subsets
-    P, I = stumpy.mstump(vectors_for_stumpy, m=m) # P.shape == (num_features, n_windows), I.shape == (num_features, n_windows)
-    profile = P[-1]
-    indices = I[-1]
-    best = np.argsort(profile)[:20]
-    for i in best:
-        j = indices[i]
-        print(
-            i,
-            j,
-            profile[i],
-            ipa_phonemes[i:i+m],
-            ipa_phonemes[j:j+m],
-        )
-    motif_distances, motif_indices, motif_neighbors, motif_subspaces = (
-        stumpy.mmotifs(vectors_for_stumpy, P, I)
-    )
-    print(motif_distances, motif_indices, motif_neighbors, motif_subspaces)
+    X = vectors_representation.T
+    cands = extract_pairwise_motifs(X, m_values=range(3, 9), top_k_per_window=30)
+    kept = greedy_keep_longest_non_subset(cands)
+    for c in kept:
+        print(c.distance, c.m, ipa_phonemes[c.start:c.end], ipa_phonemes[c.match_start:c.match_end])
 
 # `[vʲ, ˈɛ, n, t͡s, ɛ, j, p, ʃ, ˈɛ, n, d, ʑ, ɛ, j, p, ʃ, ˈɛ, s, t͡ʃ, ɛ, ɲ, v, ʒ, ˈɛ, ɲʲ, ɛ, t, ɛ, ɡ, ɔ, ɲ, ˈi, ɡ, d, ɨ, t, ɛ, ɡ, ɔ, ɲ, ˈi, t, f, ɨ, s, t, r, a, t͡s, ˈɛ, ɲʲ, a, z, n, a, t͡ʃ, ˈɛ, ɲʲ, a, p, ɔ, vʲ, ˈɛ, t͡ʃ, ɛ, p, ɔ, j, ˈɛ, ʃ, t͡ʃ, ɛ]`
 # ```
@@ -269,7 +331,6 @@ if __name__ == "__main__":
 # 23 38 0.39396502456440774 [ˈɛ, ɲʲ, ɛ, t] [ɔ, ɲ, ˈi, t]
 
 # TODO
-# Support patterns of various lengths pairwise same, and join by greedily leaving longest one and removing those which are its subsets
 # Original text of pairs would be found and motifs visualized, it could be done by retaining indices of occurence in original phonemes, refactored to separate PhonemeOccurence with stress and location, and as composition holding flyweight PhonemeType
 
 # Other more expensive algorithms could be ran on each window to reveal which have least distance in respect to some distance measure
