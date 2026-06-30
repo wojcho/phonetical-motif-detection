@@ -232,6 +232,7 @@ def find_phoneme_to_text_mapping(
     # TODO as of now it only matches boundaries of words
     # more fine grained matching would be better
     # use g2p sequence alignment bertween phonemes and graphemes
+    # or monotonic segmentation, where order and monotonicity can be simplifications
 
     # extract words with spans
     words = [
