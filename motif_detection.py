@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import stumpy
 import unicodedata
+from functools import lru_cache
 
 def text_to_ipa(text: str, lang: str = "pl") -> str:
     """
@@ -19,7 +20,6 @@ def text_to_ipa(text: str, lang: str = "pl") -> str:
         with_stress=True,
         njobs=1
     )
-    print(ipa)
     return ipa
 
 def load_feature_weights(path: str) -> dict[str, float]:
@@ -213,6 +213,10 @@ def ipa_to_segments(ipa: str) -> list[Phoneme]:
 
     return segments
 
+@lru_cache(maxsize=100000)
+def cached_text_to_segments(segment: str, lang: str):
+    return ipa_to_segments(text_to_ipa(segment, lang))
+
 WORD_RE = re.compile(r"\S+")
 
 def find_phoneme_to_text_mapping(
@@ -228,50 +232,134 @@ def find_phoneme_to_text_mapping(
     Returned values have format:
     [{ "phoneme_index": int, "plaintext_index_start": int, "plaintext_index_end": int }, ...]
     """
-
-    # TODO as of now it only matches boundaries of words
-    # more fine grained matching would be better
-    # use g2p sequence alignment bertween phonemes and graphemes
-    # or monotonic segmentation, where order and monotonicity can be simplifications
-
     # extract words with spans
     words = [
         (m.group(), m.start(), m.end())
         for m in WORD_RE.finditer(plaintext)
     ]
-
     result = []
-
     phon_index = 0
 
     for word, w_start, w_end in words:
-
-        # phonemize single word (ground truth reference)
         word_ipa = text_to_ipa(word, lang=lang)
-
+        print(word_ipa)
         word_segments = ipa_to_segments(word_ipa)
 
-        # match phoneme part in global sequence
-        local_start = phon_index
-        local_end = phon_index + len(word_segments)
+        aligned = align_word_to_phonemes(
+            plaintext_word=word,
+            phonemized_word=word_segments,
+            lang=lang
+        )
 
-        global_part = phonemized[local_start:local_end]
+        if not aligned:
+            # as fallback use whole word for all phonemes
+            for idx in range(phon_index, phon_index + len(word_segments)):
+                result.append({
+                    "phoneme_index": idx,
+                    "plaintext_start": w_start,
+                    "plaintext_end": w_end,
+                })
+            phon_index += len(word_segments)
+            continue
 
-        # sanity fallback, if mismatch then resync greedily
-        if len(global_part) != len(word_segments):
-            # fallback, trust global alignment window growth
-            local_end = min(len(phonemized), local_start + len(word_segments))
-            global_part = phonemized[local_start:local_end]
+        # aligned pieces are in word-local indices
+        for local_idx, span in enumerate(aligned):
+            global_idx = phon_index + local_idx
 
-        # assign character span to each phoneme
-        for idx, p in enumerate(global_part, start=local_start):
             result.append({
-                "phoneme_index": idx,
-                "plaintext_start": w_start,
-                "plaintext_end": w_end,
+                "phoneme_index": global_idx,
+                "plaintext_start": w_start + span["word_index_start"],
+                "plaintext_end": w_start + span["word_index_end"],
             })
 
-        phon_index = local_end
+        phon_index += len(word_segments)
+
+    return result
+
+def align_word_to_phonemes(
+    plaintext_word: str,
+    phonemized_word: list[Phoneme],
+    lang: str = "pl",
+    beam_width: int = 5,
+    max_expand: int = 6
+) -> list[dict["word_index_start" | "word_index_start", int]]:
+    """
+    List in same order as Phonemes in phonemized_word, containing start and end of phonemes
+    [{ "word_index_start": int, "word_index_start": int }, ...]
+    """
+
+    def _phoneme_match_cost(a: list[Phoneme], b: list[Phoneme]) -> float:
+        """
+        Simple mismatch score, with symbol exact match
+        0 is perfect match, higher cost is worse
+        """
+        n = max(len(a), len(b))
+        cost = 0.0
+
+        for i in range(n):
+            if i >= len(a) or i >= len(b):
+                cost += 1.0
+                continue
+            if a[i].symbol != b[i].symbol:
+                cost += 1.0
+
+        return cost
+
+    n_chars = len(plaintext_word)
+    n_phon = len(phonemized_word)
+
+    initial = { "char_i": 0, "phon_i": 0, "path": [] }
+    beam = [initial]
+
+    finished = []
+
+    while beam:
+        new_beam = []
+
+        for state in beam:
+
+            if state["char_i"] == n_chars and state["phon_i"] == n_phon:
+                finished.append(state)
+                continue
+
+            if state["char_i"] >= n_chars or state["phon_i"] >= n_phon:
+                continue
+
+            # expand character span
+            for j in range(state["char_i"] + 1, min(n_chars + 1, state["char_i"] + max_expand + 1)):
+
+                segment = plaintext_word[state["char_i"]:j]
+
+                ipa = cached_text_to_segments(segment, lang=lang)
+
+                # try aligning to next phoneme chunk sizes
+                for k in range(1, min(n_phon - state["phon_i"] + 1, 6)):
+
+                    target = phonemized_word[state["phon_i"]:state["phon_i"] + k]
+
+                    cost = _phoneme_match_cost(ipa, target)
+
+                    new_path = state["path"] + [(state["char_i"], j, state["phon_i"], state["phon_i"] + k, cost)]
+
+                    new_beam.append(
+                        { "char_i": j, "phon_i": state["phon_i"] + k, "path": new_path }
+                    )
+
+        # prune beam
+        beam = sorted(new_beam, key=lambda s: len(s["path"]))[:beam_width]
+
+    if not finished:
+        return []
+
+    best = min(finished, key=lambda s: len(s["path"]))
+
+    # reconstruct output
+    result = []
+    for (ci, cj, pi, pj, cost) in best["path"]:
+        result.append({
+            "word_index_start": ci,
+            "word_index_end": cj,
+        })
 
     return result
 
@@ -300,7 +388,7 @@ class MotifSpan:
 def extract_pairwise_motifs(X: np.ndarray, m_values: Iterable=range(2, 9), top_k_per_window: int=20):
     """
     X: shape (n_features, n_timestamps) for stumpy
-    Returns motif candidates across multiple window lengths.
+    Returns motif candidates across multiple window lengths
     """
     candidates: list[MotifSpan] = []
 
@@ -359,8 +447,15 @@ if __name__ == "__main__":
     ipa_phonemes = ipa_to_segments(text_to_ipa(sample))
     print(ipa_phonemes)
 
-    index_mapping = find_phoneme_to_text_mapping(sample, ipa_phonemes)
-    print(index_mapping)
+    # index_mapping = find_phoneme_to_text_mapping(sample, ipa_phonemes)
+    # print(index_mapping)
+
+    text_phoneme_mapping = find_phoneme_to_text_mapping(sample, ipa_phonemes)
+
+    for phoneme_source, phoneme in zip(text_phoneme_mapping, ipa_phonemes):
+        start = phoneme_source["plaintext_start"]
+        end = phoneme_source["plaintext_end"]
+        print(f"{phoneme.symbol} -> {sample[start:end]!r}")
 
     # vectors_representation = np.array([phoneme.as_vector() for phoneme in ipa_phonemes], dtype=np.float64)
     # print(vectors_representation)
