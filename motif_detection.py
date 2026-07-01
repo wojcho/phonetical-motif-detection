@@ -326,7 +326,10 @@ if __name__ == "__main__":
     #     print(c.distance, c.length, ipa_phonemes[c.start:c.end], ipa_phonemes[c.match_start:c.match_end])
 
 # TODO
-# Original text of pairs would be found and motifs visualized
+# Refactor to use separate PhonemeOccurence from flyweight Phoneme
+# Use G2P instead of phonemizer
+# In PhonemeOccurence, store plaintext_index_begin and plaintext_index_end
+# Showcase locations of found spans
 # Improve using a measurement rather than fixed amount of top pairs
 
 # Other more expensive algorithms could be ran on each window to reveal which have least distance in respect to some distance measure
