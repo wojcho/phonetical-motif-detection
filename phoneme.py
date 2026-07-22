@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import csv
 
 def load_feature_weights(path: str) -> dict[str, float]:
@@ -122,3 +122,27 @@ class PhonemeOccurence:
 
     plaintext_index_begin: int # Index of first index which was transduced from plaintext part to phoneme
     plaintext_index_end: int # Index after last index which was transduced from plaintext part to phoneme
+
+IPA_SYMBOLS = sorted(
+    IPA_FEATURES.keys(),
+    key=len,
+    reverse=True,
+)
+
+@dataclass(slots=True)
+class TrieNode:
+    children: dict[str, TrieNode] = field(default_factory=dict)
+    symbol: str | None = None
+
+def build_trie(symbols: list[str]) -> TrieNode:
+    root = TrieNode()
+
+    for symbol in symbols:
+        node = root
+        for ch in symbol:
+            node = node.children.setdefault(ch, TrieNode())
+        node.symbol = symbol
+
+    return root
+
+IPA_TRIE = build_trie(IPA_SYMBOLS)

@@ -86,7 +86,6 @@ def greedy_keep_longest_non_subset(candidates: list[MotifSpan]) -> list[MotifSpa
 if __name__ == "__main__":
     text = "W Szczebrzeszynie chrząszcz brzmi w trzcinie i Szczebrzeszyn z tego słynie"
     phonemized = plaintext_to_phoneme_occurences(text, "pol")
-    print(phonemized)
 
     for phoneme_occurence in phonemized:
         begin = phoneme_occurence.plaintext_index_begin
