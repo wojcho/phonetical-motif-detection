@@ -1,111 +1,8 @@
-from phonemizer import phonemize
-import re
+from dataclasses import dataclass
 import numpy as np
 import stumpy
-import unicodedata
 
-def text_to_ipa(text: str, lang: str = "pl") -> str:
-    """
-    Convert text to IPA using espeak backend through phonemizer
-    """
-    ipa = phonemize(
-        text,
-        language=lang,
-        backend="espeak",
-        strip=True,
-        preserve_punctuation=False,
-        with_stress=True,
-        njobs=1
-    )
-    return ipa
-
-AFFRICATES = ["t͡s", "d͡z", "t͡ʂ", "d͡ʐ", "t͡ʃ", "t͡ɕ"]
-PALATAL_MARKER = "ʲ"
-
-AFFRICATE_NORMALIZATION = [
-    (r"t\s?͡?\s?s", "t͡s"),
-    (r"d\s?͡?\s?z", "d͡z"),
-    (r"t\s?͡?\s?ʂ", "t͡ʂ"),
-    (r"d\s?͡?\s?ʐ", "d͡ʐ"),
-    (r"t\s?͡?\s?ʃ", "t͡ʃ"),
-    (r"t\s?͡?\s?ɕ", "t͡ɕ"),
-]
-
-def normalize_ipa(ipa: str) -> str:
-    """
-    Make representation of various phonemes more uniform, remove low signal data
-    """
-    for pattern, repl in AFFRICATE_NORMALIZATION:
-        ipa = re.sub(pattern, repl, ipa)
-    ipa = re.sub("ˌ", "", ipa) # Remove secondary stress
-    return ipa
-
-def ipa_to_segments(ipa: str) -> list[Phoneme]:
-    """
-    Tokenize IPA to Phoneme data classes
-    """
-    ipa = normalize_ipa(ipa)
-
-    segments = []
-    i = 0
-    stress = False
-
-    while i < len(ipa):
-
-        # stress marker
-        if ipa[i] == "ˈ":
-            stress = True
-            i += 1
-            continue
-
-        # whitespace = syllable boundary reset stress (optional design choice)
-        if ipa[i].isspace():
-            i += 1
-            continue
-
-        # affricates
-        matched = False
-        for aff in AFFRICATES:
-            if ipa.startswith(aff, i):
-                segments.append(get_phoneme(aff, stress=stress))
-                stress = False
-                i += len(aff)
-                matched = True
-                break
-        if matched:
-            continue
-
-        # grab base char + following combining marks
-        j = i + 1
-        while j < len(ipa) and unicodedata.combining(ipa[j]):
-            j += 1
-
-        symbol = ipa[i:j]
-
-        # palatalized consonants
-        if j < len(ipa) and ipa[j] == PALATAL_MARKER:
-            symbol += PALATAL_MARKER
-            j += 1
-
-        # append phoneme
-        segments.append(get_phoneme(symbol, stress=stress))
-        stress = False
-        i = j
-
-    return segments
-
-def find_phoneme_to_text_mapping(
-    plaintext: str,
-    phonemized: list[Phoneme],
-    lang: str = "pl"
-) -> list[dict["phoneme_index" | "plaintext_start" | "plaintext_end", int | str]]:
-    """
-    Find beginning and ending indices of text characters in plaintext, corresponding to Phonemes in list
-    It assumes that for each Phoneme, many or none graphemes from plaintext can be assigned
-    Returned values have format:
-    [{ "phoneme_index": int, "plaintext_index_start": int, "plaintext_index_end": int }, ...]
-    """
-    pass
+from phonemize import plaintext_to_phoneme_occurences
 
 @dataclass(frozen=True, slots=True)
 class MotifSpan:
@@ -126,10 +23,10 @@ class MotifSpan:
     def match_interval(self) -> Tuple[int, int]:
         return (self.match_start, self.match_end)
 
-    def covers(self, other: MotifSpan) -> bool:
+    def is_covering(self, other: MotifSpan) -> bool:
         return self.start <= other.start and self.end >= other.end and self.match_start <= other.match_start and self.match_end >= other.match_end
 
-def extract_pairwise_motifs(X: np.ndarray, m_values: Iterable=range(2, 9), top_k_per_window: int=20):
+def extract_pairwise_motifs(X: np.ndarray, m_values: Iterable=range(2, 9), top_k_per_window: int=20) -> list[MotifSpan]:
     """
     X: shape (n_features, n_timestamps) for stumpy
     Returns motif candidates across multiple window lengths
@@ -174,9 +71,9 @@ def greedy_keep_longest_non_subset(candidates: list[MotifSpan]) -> list[MotifSpa
 
     def is_subset_of_kept(c: MotifSpan) -> bool:
         for k in kept:
-            if k.covers(c):
+            if k.is_covering(c):
                 return True
-            if k.covers(MotifSpan(c.match_start, c.match_end, c.start, c.end, c.distance, c.length)):
+            if k.is_covering(MotifSpan(c.match_start, c.match_end, c.start, c.end, c.distance, c.length)):
                 return True
         return False
 
@@ -188,15 +85,16 @@ def greedy_keep_longest_non_subset(candidates: list[MotifSpan]) -> list[MotifSpa
 
 if __name__ == "__main__":
     text = "W Szczebrzeszynie chrząszcz brzmi w trzcinie i Szczebrzeszyn z tego słynie"
-    ipa_phonemes = ipa_to_segments(text_to_ipa(text))
-    print(ipa_phonemes)
+    phonemized = plaintext_to_phoneme_occurences(text, "pol")
+    print(phonemized)
 
-    text_phoneme_mapping = find_phoneme_to_text_mapping(text, ipa_phonemes)
-
-    for phoneme_source, phoneme in zip(text_phoneme_mapping, ipa_phonemes):
-        start = phoneme_source["plaintext_start"]
-        end = phoneme_source["plaintext_end"]
-        print(f"{phoneme.symbol} -> {text[start:end]!r}")
+    for phoneme_occurence in phonemized:
+        begin = phoneme_occurence.plaintext_index_begin
+        end = phoneme_occurence.plaintext_index_end
+        if phoneme_occurence.phoneme:
+            print(f"{phoneme_occurence.phoneme.symbol} <- {text[begin:end]!r}")
+        else:
+            print(f"∅ <- {text[begin:end]!r}")
 
     # vectors_representation = np.array([phoneme.as_vector() for phoneme in ipa_phonemes], dtype=np.float64)
     # print(vectors_representation)
@@ -208,9 +106,6 @@ if __name__ == "__main__":
     #     print(c.distance, c.length, ipa_phonemes[c.start:c.end], ipa_phonemes[c.match_start:c.match_end])
 
 # TODO
-# Refactor to use separate PhonemeOccurence from flyweight Phoneme
-# Use G2P instead of phonemizer
-# In PhonemeOccurence, store plaintext_index_begin and plaintext_index_end
 # Showcase locations of found spans
 # Improve using a measurement rather than fixed amount of top pairs
 

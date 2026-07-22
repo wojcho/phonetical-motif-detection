@@ -57,5 +57,3 @@ def plaintext_to_phoneme_occurences(
                 )
             )
     return occurences
-
-print(plaintext_to_phoneme_occurences("szaleństwo w zwariowaniu"))
