@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import csv
+import numpy as np
 
 def load_feature_weights(path: str) -> dict[str, float]:
     with open(path, "r", encoding="utf-8", newline="") as f:
@@ -118,7 +119,7 @@ IPA_FEATURES = load_ipa_features("./ipa_all.csv")
 
 @dataclass(frozen=True, slots=True)
 class PhonemeOccurence:
-    phoneme: Phoneme | None
+    phoneme: Phoneme
 
     plaintext_index_begin: int # Index of first index which was transduced from plaintext part to phoneme
     plaintext_index_end: int # Index after last index which was transduced from plaintext part to phoneme

@@ -53,23 +53,23 @@ def plaintext_to_phoneme_occurences(
     transduced = transducer(plaintext)
     as_ipa = transduced.output_string
 
-    # output index -> list of plaintext indices which produced its corresponding text
+    # Output index -> list of plaintext indices which produced its corresponding text
     out_to_inputs: dict[int, list[int]] = dict()
     for in_i, out_i in transduced.edges:
         out_to_inputs.setdefault(out_i, []).append(in_i)
     
-    # output index -> tuple (min, max) of plaintext indices which produced its corresponding text
+    # Output index -> tuple (min, max) of plaintext indices which produced its corresponding text
     out_to_inputs_begin_end: dict[int, tuple[int, int]] = dict()
     for output_index, input_indices in out_to_inputs.items():
         begin, end = min(input_indices), max(input_indices) + 1
         out_to_inputs_begin_end[output_index] = (begin, end)
 
-    # build PhonemeOccurence objects
+    # Build PhonemeOccurence objects
     occurences: list[PhonemeOccurence] = []
     for out_begin, symbol in tokenize_ipa(as_ipa):
         out_end = out_begin + len(symbol)
 
-        # Collect every plaintext index that contributed to this IPA symbol.
+        # Collect every plaintext index that contributed to this IPA symbol
         input_indices: list[int] = []
         for out_i in range(out_begin, out_end):
             input_indices.extend(out_to_inputs.get(out_i, []))
@@ -78,21 +78,19 @@ def plaintext_to_phoneme_occurences(
             plaintext_begin = min(input_indices)
             plaintext_end = max(input_indices) + 1
         else:
-            # Shouldn't normally happen, but keeps the function robust.
-            plaintext_begin = plaintext_end = 0
+            # Should not happen
+            plaintext_begin = 0
+            plaintext_end = 0
 
+        # Skip unrecognized symbols
         if symbol in IPA_FEATURES:
             phoneme = Phoneme.from_symbol(symbol)
-        else:
-            # print(f"Unknown IPA symbol: {symbol!r}")
-            phoneme = None
-
-        occurences.append(
-            PhonemeOccurence(
-                phoneme=phoneme,
-                plaintext_index_begin=plaintext_begin,
-                plaintext_index_end=plaintext_end,
+            occurences.append(
+                PhonemeOccurence(
+                    phoneme=phoneme,
+                    plaintext_index_begin=plaintext_begin,
+                    plaintext_index_end=plaintext_end,
+                )
             )
-        )
 
     return occurences
