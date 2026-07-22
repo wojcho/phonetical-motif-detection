@@ -133,7 +133,7 @@ class PlaintextSpan:
         ]
 
     def __str__(self) -> str:
-        return f"({self.match_distance_score:.4f}, {self.text!r} <=> {self.match_text!r})"
+        return f"({self.match_distance_score:.4f} {self.text!r} <=> {self.match_text!r})"
     
     def __repr__(self) -> str:
         return self.__str__()
