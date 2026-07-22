@@ -177,3 +177,4 @@ if __name__ == "__main__":
 
 # TODO
 # Improve using a measurement rather than fixed amount of top pairs
+# Use better measure than distance to rely on word length? Unless splitting into parts handles this instead?
